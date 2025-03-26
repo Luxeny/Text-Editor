@@ -19,17 +19,36 @@ public class TextFile
     }
 }
 
+// Рреализация Memento
+public class TextFileMemento
+{
+    public string Content { get; }
+    public DateTime Timestamp { get; }
+
+    public TextFileMemento(string content)
+    {
+        Content = content;
+        Timestamp = DateTime.Now;
+    }
+}
+
 public class FileManager
 {
     private readonly string _workspacePath = "./workspace/";
 
     public FileManager()
     {
+        InitializeWorkspace();
+    }
+
+    private void InitializeWorkspace()
+    {
         Directory.CreateDirectory(_workspacePath);
         Directory.CreateDirectory(Path.Combine(_workspacePath, "binary"));
         Directory.CreateDirectory(Path.Combine(_workspacePath, "xml"));
     }
 
+    // Бинарная сериализация
     public void SaveBinary(TextFile file)
     {
         string path = Path.Combine(_workspacePath, "binary", $"{file.Name}.bin");
@@ -40,6 +59,7 @@ public class FileManager
         file.IsSaved = true;
     }
 
+    // XML сериализация
     public void SaveXml(TextFile file)
     {
         string path = Path.Combine(_workspacePath, "xml", $"{file.Name}.xml");
@@ -51,6 +71,25 @@ public class FileManager
         file.IsSaved = true;
     }
 
+    public TextFile LoadBinary(string fileName)
+    {
+        string path = Path.Combine(_workspacePath, "binary", $"{fileName}.bin");
+        using (var stream = File.OpenRead(path))
+        {
+            return (TextFile)new BinaryFormatter().Deserialize(stream);
+        }
+    }
+
+    public TextFile LoadXml(string fileName)
+    {
+        string path = Path.Combine(_workspacePath, "xml", $"{fileName}.xml");
+        var serializer = new XmlSerializer(typeof(TextFile));
+        using (var reader = new StreamReader(path))
+        {
+            return (TextFile)serializer.Deserialize(reader);
+        }
+    }
+
     public List<string> GetSavedFiles()
     {
         var files = new List<string>();
@@ -58,137 +97,150 @@ public class FileManager
         files.AddRange(Directory.GetFiles(Path.Combine(_workspacePath, "xml"), "*.xml"));
         return files;
     }
-
-    public TextFile LoadFile(string filePath)
-    {
-        if (filePath.EndsWith(".bin"))
-        {
-            using (var stream = File.OpenRead(filePath))
-            {
-                return (TextFile)new BinaryFormatter().Deserialize(stream);
-            }
-        }
-        else
-        {
-            var serializer = new XmlSerializer(typeof(TextFile));
-            using (var reader = new StreamReader(filePath))
-            {
-                return (TextFile)serializer.Deserialize(reader);
-            }
-        }
-    }
 }
 
 public class TextEditor
 {
     private readonly FileManager _fileManager = new FileManager();
     private TextFile _currentFile;
-    private string _lastContent;
+    private readonly Stack<TextFileMemento> _history = new Stack<TextFileMemento>();
 
     public void Run()
     {
         while (true)
         {
             Console.Clear();
-            Console.WriteLine("Текстовый редактор");
-            Console.WriteLine("1. Создать файл");
-            Console.WriteLine("2. Открыть файл");
-            Console.WriteLine("3. Сохранить файл");
-            Console.WriteLine("4. Показать содержимое");
-            Console.WriteLine("0. Выход");
-            
-            var choice = Console.ReadLine();
-            switch (choice)
-            {
-                case "1":
-                    CreateFile();
-                    break;
-                case "2":
-                    OpenFile();
-                    break;
-                case "3":
-                    SaveFile();
-                    break;
-                case "4":
-                    ShowContent();
-                    break;
-                case "0":
-                    return;
-            }
+            ShowMenu();
+            HandleChoice();
         }
+    }
+
+    private void ShowMenu()
+    {
+        Console.WriteLine("=== ТЕКСТОВЫЙ РЕДАКТОР ===");
+        Console.WriteLine("1. Создать файл");
+        Console.WriteLine("2. Открыть файл");
+        Console.WriteLine("3. Редактировать файл");
+        Console.WriteLine("4. Сохранить файл (бинарный)");
+        Console.WriteLine("5. Сохранить файл (XML)");
+        Console.WriteLine("6. Откатить изменения");
+        Console.WriteLine("0. Выход");
+        Console.Write("Выберите действие: ");
+    }
+
+    private void HandleChoice()
+    {
+        switch (Console.ReadLine())
+        {
+            case "1": CreateFile(); break;
+            case "2": OpenFile(); break;
+            case "3": EditFile(); break;
+            case "4": SaveFile(binary: true); break;
+            case "5": SaveFile(binary: false); break;
+            case "6": Undo(); break;
+            case "0": Environment.Exit(0); break;
+            default: Console.WriteLine("Неверный ввод"); break;
+        }
+        Console.WriteLine("\nНажмите любую клавишу...");
+        Console.ReadKey();
     }
 
     private void CreateFile()
     {
         Console.Write("Имя файла: ");
-        var name = Console.ReadLine();
+        string name = Console.ReadLine();
         Console.Write("Содержимое: ");
-        var content = Console.ReadLine();
+        string content = Console.ReadLine();
         
         _currentFile = new TextFile(name, content);
-        _lastContent = content;
+        SaveState();
         Console.WriteLine("Файл создан");
-        Console.ReadKey();
     }
 
     private void OpenFile()
     {
         var files = _fileManager.GetSavedFiles();
+        if (files.Count == 0)
+        {
+            Console.WriteLine("Нет сохраненных файлов");
+            return;
+        }
+
         for (int i = 0; i < files.Count; i++)
         {
             Console.WriteLine($"{i+1}. {Path.GetFileName(files[i])}");
         }
-        
+
         Console.Write("Выберите файл: ");
         if (int.TryParse(Console.ReadLine(), out int index) && index > 0 && index <= files.Count)
         {
-            _currentFile = _fileManager.LoadFile(files[index-1]);
-            _lastContent = _currentFile.Content;
-            Console.WriteLine("Файл загружен");
+            string filePath = files[index-1];
+            _currentFile = filePath.EndsWith(".bin") 
+                ? _fileManager.LoadBinary(Path.GetFileNameWithoutExtension(filePath))
+                : _fileManager.LoadXml(Path.GetFileNameWithoutExtension(filePath));
+            
+            SaveState();
+            Console.WriteLine($"Файл открыт: {_currentFile.Content}");
         }
-        Console.ReadKey();
     }
 
-    private void SaveFile()
+    private void EditFile()
     {
         if (_currentFile == null)
         {
             Console.WriteLine("Нет открытого файла");
-            Console.ReadKey();
             return;
         }
 
-        Console.WriteLine("1. Бинарный формат");
-        Console.WriteLine("2. XML формат");
-        var choice = Console.ReadLine();
-        
-        try
-        {
-            if (choice == "1") _fileManager.SaveBinary(_currentFile);
-            else if (choice == "2") _fileManager.SaveXml(_currentFile);
-            _lastContent = _currentFile.Content;
-            Console.WriteLine("Файл сохранён");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Ошибка: {ex.Message}");
-        }
-        Console.ReadKey();
+        Console.WriteLine($"Текущее содержимое: {_currentFile.Content}");
+        Console.Write("Новое содержимое: ");
+        _currentFile.Content = Console.ReadLine();
+        _currentFile.IsSaved = false;
+        SaveState();
     }
 
-    private void ShowContent()
+    private void SaveFile(bool binary)
     {
         if (_currentFile == null)
         {
             Console.WriteLine("Нет открытого файла");
+            return;
         }
+
+        if (binary)
+            _fileManager.SaveBinary(_currentFile);
         else
+            _fileManager.SaveXml(_currentFile);
+        
+        Console.WriteLine($"Файл сохранен в {(binary ? "бинарном" : "XML")} формате");
+    }
+
+    private void Undo()
+    {
+        if (_history.Count <= 1 || _currentFile == null)
         {
-            Console.WriteLine($"Содержимое файла {_currentFile.Name}:");
-            Console.WriteLine(_currentFile.Content);
-            Console.WriteLine($"Статус: {(_currentFile.IsSaved ? "Сохранён" : "Не сохранён")}");
+            Console.WriteLine("Невозможно откатить изменения");
+            return;
         }
-        Console.ReadKey();
+
+        // Удаляем текущее состояние
+        _history.Pop();
+        
+        // Восстанавливаем предыдущее
+        var previousState = _history.Peek();
+        _currentFile.Content = previousState.Content;
+        _currentFile.IsSaved = false;
+        
+        Console.WriteLine($"Изменения отменены (состояние на {previousState.Timestamp:HH:mm:ss})");
+        Console.WriteLine($"Текущее содержимое: {_currentFile.Content}");
+    }
+
+    private void SaveState()
+    {
+        if (_currentFile != null)
+        {
+            _history.Push(new TextFileMemento(_currentFile.Content));
+        }
     }
 }
 
