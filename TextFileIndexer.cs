@@ -21,7 +21,10 @@ public class TextFileIndexer
             TextFile textFile = file.EndsWith(".bin") 
                 ? _fileManager.LoadBinary(file) 
                 : _fileManager.LoadXml(file);
-
+    
+            if (textFile == null || string.IsNullOrEmpty(textFile.Content))
+                continue;
+    
             var words = textFile.Content.Split(new[] { ' ', ',', '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var word in words)
             {
