@@ -4,12 +4,16 @@ using System.Collections.Generic;
 public class TextEditor
 {
     private readonly FileManager _fileManager;
+    private readonly TextFileIndexer _indexer;
     private TextFile _currentFile;
     private readonly Stack<TextFileMemento> _history = new Stack<TextFileMemento>();
 
     public TextEditor()
     {
         _fileManager = new FileManager();
+        _fileManager.OnFileChanged += (path) => _indexer.BuildIndex();
+        _indexer = new TextFileIndexer(_fileManager);
+        _indexer.BuildIndex();
     }
 
     public void CreateFile()
@@ -32,22 +36,30 @@ public class TextEditor
             Console.WriteLine("Нет доступных файлов.");
             return;
         }
-
+    
         Console.WriteLine("Доступные файлы:");
         for (int i = 0; i < files.Count; ++i)
         {
             Console.WriteLine($"{i + 1}. {files[i]}");
         }
-
+    
         Console.Write("Выберите файл: ");
         if (int.TryParse(Console.ReadLine(), out int index) && index > 0 && index <= files.Count)
         {
             string filePath = files[index - 1];
             _currentFile = filePath.EndsWith(".bin") ?
-              _fileManager.LoadBinary(filePath) :
-              _fileManager.LoadXml(filePath);
-            SaveState();
-            Console.WriteLine($"Файл открыт:\n{_currentFile.Content}");
+                _fileManager.LoadBinary(filePath) :
+                _fileManager.LoadXml(filePath);
+                
+            if (_currentFile != null)
+            {
+                SaveState();
+                Console.WriteLine($"Файл открыт:\n{_currentFile.Content}");
+            }
+            else
+            {
+                Console.WriteLine("Не удалось загрузить файл.");
+            }
         }
         else
         {
@@ -98,6 +110,7 @@ public class TextEditor
                     Console.WriteLine("Неверный выбор.");
                     return;
             }
+            _indexer.BuildIndex(); 
             Console.WriteLine("Файл сохранен.");
         }
     }
@@ -106,15 +119,15 @@ public class TextEditor
     {
         Console.Write("Введите ключевые слова через запятую: ");
         string input = Console.ReadLine();
-        var keywords = new List<string>(input.Split(','));
-
-        var results = _fileManager.SearchFiles(keywords);
+        var keywords = new List<string>(input.Split(',').Select(k => k.Trim())); 
+        var results = _indexer.SearchIndex(keywords); 
+        
         if (results.Count == 0)
         {
             Console.WriteLine("Файлы не найдены.");
             return;
         }
-
+    
         Console.WriteLine("Найденные файлы:");
         foreach (var file in results)
         {
@@ -176,6 +189,7 @@ public class TextEditor
               "\n5) Найти файлы по ключевым словам" +
               "\n6) Просмотреть все файлы" +
               "\n7) Откатить изменения" +
+              "\n8) Обновить индекс поиска" +
               "\n0) Выход");
             Console.Write("Выберите действие: ");
 
@@ -203,6 +217,10 @@ public class TextEditor
                         break;
                     case 7: 
                         Undo(); 
+                        break;
+                    case 8:
+                        _indexer.BuildIndex();
+                        Console.WriteLine("Индекс поиска обновлён.");
                         break;
                     case 0: 
                         return;
